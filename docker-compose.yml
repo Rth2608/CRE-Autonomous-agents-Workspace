@@ -1,0 +1,80 @@
+services:
+  openclaw-gpt:
+    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:main}
+    container_name: openclaw-gpt
+    init: true
+    restart: unless-stopped
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      OPENCLAW_GATEWAY_TOKEN: ${GPT_GATEWAY_TOKEN}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      MOLTBOOK_API_KEY: ${GPT_MOLTBOOK_API_KEY:-}
+      MOLTBOOK_AGENT_NAME: ${GPT_MOLTBOOK_AGENT_NAME:-openclaw-gpt}
+    volumes:
+      - ./state/gpt:/home/node/.openclaw
+      - ./config/gpt/openclaw.json:/home/node/.openclaw/openclaw.json:ro
+    ports:
+      - "${GPT_GATEWAY_PORT:-18789}:18789"
+      - "${GPT_BRIDGE_PORT:-18790}:18790"
+
+  openclaw-claude:
+    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:main}
+    container_name: openclaw-claude
+    init: true
+    restart: unless-stopped
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      OPENCLAW_GATEWAY_TOKEN: ${CLAUDE_GATEWAY_TOKEN}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      MOLTBOOK_API_KEY: ${CLAUDE_MOLTBOOK_API_KEY:-}
+      MOLTBOOK_AGENT_NAME: ${CLAUDE_MOLTBOOK_AGENT_NAME:-openclaw-claude}
+    volumes:
+      - ./state/claude:/home/node/.openclaw
+      - ./config/claude/openclaw.json:/home/node/.openclaw/openclaw.json:ro
+    ports:
+      - "${CLAUDE_GATEWAY_PORT:-18889}:18789"
+      - "${CLAUDE_BRIDGE_PORT:-18890}:18790"
+
+  openclaw-gemini:
+    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:main}
+    container_name: openclaw-gemini
+    init: true
+    restart: unless-stopped
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      OPENCLAW_GATEWAY_TOKEN: ${GEMINI_GATEWAY_TOKEN}
+      MOLTBOOK_API_KEY: ${GEMINI_MOLTBOOK_API_KEY:-}
+      MOLTBOOK_AGENT_NAME: ${GEMINI_MOLTBOOK_AGENT_NAME:-openclaw-gemini}
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gemini-vertex-sa.json
+      GOOGLE_CLOUD_PROJECT: ${GEMINI_VERTEX_PROJECT_ID}
+      GOOGLE_CLOUD_LOCATION: ${GEMINI_VERTEX_LOCATION:-us-central1}
+      GOOGLE_GENAI_USE_VERTEXAI: "true"
+    volumes:
+      - ./state/gemini:/home/node/.openclaw
+      - ./config/gemini/openclaw.json:/home/node/.openclaw/openclaw.json:ro
+      - ${GEMINI_VERTEX_CREDENTIALS_FILE:-./secrets/gemini-vertex-sa.json}:/run/secrets/gemini-vertex-sa.json:ro
+    ports:
+      - "${GEMINI_GATEWAY_PORT:-18989}:18789"
+      - "${GEMINI_BRIDGE_PORT:-18990}:18790"
+
+  openclaw-grok:
+    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:main}
+    container_name: openclaw-grok
+    init: true
+    restart: unless-stopped
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      OPENCLAW_GATEWAY_TOKEN: ${GROK_GATEWAY_TOKEN}
+      XAI_API_KEY: ${XAI_API_KEY}
+      MOLTBOOK_API_KEY: ${GROK_MOLTBOOK_API_KEY:-}
+      MOLTBOOK_AGENT_NAME: ${GROK_MOLTBOOK_AGENT_NAME:-openclaw-grok}
+    volumes:
+      - ./state/grok:/home/node/.openclaw
+      - ./config/grok/openclaw.json:/home/node/.openclaw/openclaw.json:ro
+    ports:
+      - "${GROK_GATEWAY_PORT:-19089}:18789"
+      - "${GROK_BRIDGE_PORT:-19090}:18790"

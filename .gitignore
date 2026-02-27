@@ -1,0 +1,34 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+autonomy/config.env
+secrets/
+state/
+
+# Runtime state and logs
+autonomy/state/
+autonomy/logs/
+*.log
+
+# Local multi-agent working clones (do not version nested repos)
+workdirs/
+
+# Python cache/artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editor/OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Generic temp files
+*.tmp
+*.bak
+*.orig

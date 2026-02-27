@@ -1,0 +1,21 @@
+{
+  "gateway": {
+    "http": {
+      "endpoints": {
+        "responses": {
+          "enabled": true
+        },
+        "chatCompletions": {
+          "enabled": true
+        }
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openai/gpt-5.2"
+      }
+    }
+  }
+}

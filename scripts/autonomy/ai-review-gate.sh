@@ -23,7 +23,36 @@ base_branch="${2:-main}"
 require_cmd jq
 require_cmd git
 
+# Preserve one-shot env overrides passed by caller.
+review_min_approvals_override_set=false
+review_block_on_high_override_set=false
+review_include_author_override_set=false
+review_min_approvals_override=""
+review_block_on_high_override=""
+review_include_author_override=""
+if [[ -n "${REVIEW_MIN_APPROVALS+x}" ]]; then
+  review_min_approvals_override_set=true
+  review_min_approvals_override="$REVIEW_MIN_APPROVALS"
+fi
+if [[ -n "${REVIEW_BLOCK_ON_HIGH+x}" ]]; then
+  review_block_on_high_override_set=true
+  review_block_on_high_override="$REVIEW_BLOCK_ON_HIGH"
+fi
+if [[ -n "${REVIEW_INCLUDE_AUTHOR+x}" ]]; then
+  review_include_author_override_set=true
+  review_include_author_override="$REVIEW_INCLUDE_AUTHOR"
+fi
+
 load_autonomy_config
+if [[ "$review_min_approvals_override_set" == "true" ]]; then
+  REVIEW_MIN_APPROVALS="$review_min_approvals_override"
+fi
+if [[ "$review_block_on_high_override_set" == "true" ]]; then
+  REVIEW_BLOCK_ON_HIGH="$review_block_on_high_override"
+fi
+if [[ "$review_include_author_override_set" == "true" ]]; then
+  REVIEW_INCLUDE_AUTHOR="$review_include_author_override"
+fi
 ensure_virtual_mode
 ensure_not_emergency_stopped
 ensure_no_pending_human_approvals

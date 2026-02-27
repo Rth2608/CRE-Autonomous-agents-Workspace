@@ -30,7 +30,27 @@ pr_number="$2"
 base_branch="${3:-main}"
 repo_dir="$(agent_workdir "$author")"
 
+# Preserve one-shot env overrides passed at invocation time.
+merge_consensus_min_override_set=false
+merge_block_on_high_override_set=false
+merge_consensus_min_override=""
+merge_block_on_high_override=""
+if [[ -n "${MERGE_CONSENSUS_MIN+x}" ]]; then
+  merge_consensus_min_override_set=true
+  merge_consensus_min_override="$MERGE_CONSENSUS_MIN"
+fi
+if [[ -n "${MERGE_BLOCK_ON_HIGH+x}" ]]; then
+  merge_block_on_high_override_set=true
+  merge_block_on_high_override="$MERGE_BLOCK_ON_HIGH"
+fi
+
 load_autonomy_config
+if [[ "$merge_consensus_min_override_set" == "true" ]]; then
+  MERGE_CONSENSUS_MIN="$merge_consensus_min_override"
+fi
+if [[ "$merge_block_on_high_override_set" == "true" ]]; then
+  MERGE_BLOCK_ON_HIGH="$merge_block_on_high_override"
+fi
 ensure_virtual_mode
 ensure_not_emergency_stopped
 ensure_no_pending_human_approvals

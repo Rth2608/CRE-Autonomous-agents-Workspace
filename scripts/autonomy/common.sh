@@ -54,6 +54,33 @@ require_cmd() {
 }
 
 load_autonomy_config() {
+  load_env_file() {
+    local env_file="$1"
+    [[ -f "$env_file" ]] || return 0
+
+    local line key val
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line%$'\r'}"
+      [[ -z "$line" ]] && continue
+      [[ "$line" =~ ^[[:space:]]*# ]] && continue
+      [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+
+      key="${line%%=*}"
+      val="${line#*=}"
+
+      # Strip matching outer quotes for common .env forms.
+      if [[ "$val" =~ ^\".*\"$ ]]; then
+        val="${val:1:${#val}-2}"
+      elif [[ "$val" =~ ^\'.*\'$ ]]; then
+        val="${val:1:${#val}-2}"
+      fi
+
+      export "$key=$val"
+    done < "$env_file"
+  }
+
+  load_env_file "$ROOT_DIR/.env"
+
   local cfg="$AUTONOMY_DIR/config.env"
   if [[ -f "$cfg" ]]; then
     set -a

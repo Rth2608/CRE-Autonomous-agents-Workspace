@@ -64,27 +64,33 @@ ALLOWED_CHAT_IDS = parse_id_set(os.getenv("TELEGRAM_ALLOWED_CHAT_IDS", ""))
 POLL_TIMEOUT_SECONDS = int(os.getenv("TELEGRAM_POLL_TIMEOUT_SECONDS", "30"))
 COMMAND_TIMEOUT_SECONDS = int(os.getenv("TELEGRAM_COMMAND_TIMEOUT_SECONDS", "900"))
 MAX_OUTPUT_CHARS = int(os.getenv("TELEGRAM_MAX_OUTPUT_CHARS", "3500"))
-ENABLE_E2E_MERGE = getenv_bool("TELEGRAM_ENABLE_E2E_MERGE", False)
 LEADER_ONLY_MODE = getenv_bool("TELEGRAM_LEADER_ONLY_MODE", True)
 MINIMAL_COMMAND_MODE = getenv_bool("TELEGRAM_MINIMAL_COMMAND_MODE", True)
 REQUIRE_APPROVAL_COMMANDS = {
     x.strip().lower()
-    for x in os.getenv("TELEGRAM_REQUIRE_APPROVAL_COMMANDS", "pr,e2e_merge").split(",")
+    for x in os.getenv("TELEGRAM_REQUIRE_APPROVAL_COMMANDS", "").split(",")
     if x.strip()
 }
 AUTO_REQUEST_ON_BLOCKER = getenv_bool("TELEGRAM_AUTO_REQUEST_ON_BLOCKER", True)
 PAUSE_DEV_WHEN_PENDING = getenv_bool("TELEGRAM_PAUSE_DEV_WHEN_PENDING", True)
 AUTO_PLAN_REVIEW_ON_PENDING = getenv_bool("TELEGRAM_AUTO_PLAN_REVIEW_ON_PENDING", True)
-PLAN_REVIEW_REPO = os.getenv("TELEGRAM_PLAN_REVIEW_REPO", "workdirs/gpt").strip()
 AGENT_CONSENSUS_REQUIRED = getenv_bool("TELEGRAM_AGENT_CONSENSUS_REQUIRED", True)
 AGENT_CONSENSUS_MIN = max(1, min(4, getenv_int("TELEGRAM_AGENT_CONSENSUS_MIN", 3)))
 WATCHDOG_ENABLED = getenv_bool("TELEGRAM_WATCHDOG_ENABLED", True)
 WATCHDOG_INTERVAL_SECONDS = max(30, getenv_int("TELEGRAM_WATCHDOG_INTERVAL_SECONDS", 300))
 WATCHDOG_TIMEOUT_SECONDS = max(60, getenv_int("TELEGRAM_WATCHDOG_TIMEOUT_SECONDS", 240))
 WATCHDOG_ALERT_COOLDOWN_SECONDS = max(60, getenv_int("TELEGRAM_WATCHDOG_ALERT_COOLDOWN_SECONDS", 600))
-WATCHDOG_PROMPT = os.getenv("TELEGRAM_WATCHDOG_PROMPT", "한 문장으로 hello")
+WATCHDOG_PROMPT = os.getenv("TELEGRAM_WATCHDOG_PROMPT", "Say hello in one sentence.")
 WATCHDOG_CHECK_MOLTBOOK = getenv_bool("TELEGRAM_WATCHDOG_CHECK_MOLTBOOK", True)
-DEV_BLOCK_COMMAND_KEYS = {"commit", "pr", "e2e", "e2e_merge"}
+EXTERNAL_CONTENT_QUARANTINE = getenv_bool("EXTERNAL_CONTENT_QUARANTINE", True)
+QUARANTINE_ALLOWED_HOSTS = parse_id_set(
+    os.getenv(
+        "QUARANTINE_ALLOWED_HOSTS",
+        "chain.link,docs.chain.link,github.com,raw.githubusercontent.com,api.github.com,"
+        "docs.tenderly.co,tenderly.co,docs.world.org,world.org,moltbook.com,www.moltbook.com",
+    )
+)
+DEV_BLOCK_COMMAND_KEYS = {"cycle"}
 LEADER_AGENT = os.getenv("AGENT_LEADER", "gemini").strip().lower()
 STOP_COMMANDS = {"/stop", "/emergency_stop", "/panic"}
 RESUME_COMMANDS = {"/resume", "/continue"}
@@ -95,6 +101,7 @@ MINIMAL_ALLOWED_COMMANDS = {
     "/approve",
     "/reject",
     "/status",
+    "/cycle",
     "/stop",
     "/emergency_stop",
     "/panic",
@@ -126,6 +133,7 @@ STATE_DIR.mkdir(parents=True, exist_ok=True)
 APPROVAL_DIR.mkdir(parents=True, exist_ok=True)
 CONSENSUS_DIR.mkdir(parents=True, exist_ok=True)
 API_BASE = f"https://api.telegram.org/bot{BOT_TOKEN}"
+URL_RE = re.compile(r"https?://[^\s<>()\"']+")
 
 
 def tg_api(method: str, payload: Dict) -> Dict:
@@ -250,21 +258,56 @@ def run_cmd(args: List[str], timeout: Optional[int] = None) -> Tuple[int, str]:
     return proc.returncode, out
 
 
-def safe_rel_path(raw: str) -> Optional[Path]:
-    p = Path(raw)
-    if p.is_absolute():
-        cand = p
-    else:
-        cand = ROOT_DIR / p
-    try:
-        resolved = cand.resolve()
-    except Exception:
-        return None
-    try:
-        resolved.relative_to(ROOT_DIR)
-    except ValueError:
-        return None
-    return resolved
+def host_allowlisted(host: str) -> bool:
+    h = (host or "").strip().lower()
+    if not h:
+        return False
+    for allow in QUARANTINE_ALLOWED_HOSTS:
+        a = allow.strip().lower()
+        if not a:
+            continue
+        if h == a or h.endswith(f".{a}"):
+            return True
+    return False
+
+
+def quarantine_text_violations(text: str, check_patterns: bool = True) -> List[str]:
+    if not EXTERNAL_CONTENT_QUARANTINE:
+        return []
+
+    violations: List[str] = []
+    raw = text or ""
+
+    for match in URL_RE.findall(raw):
+        cleaned = match.rstrip("),.;:!?")
+        try:
+            parsed = urllib.parse.urlparse(cleaned)
+        except Exception:
+            violations.append(f"invalid_url:{cleaned}")
+            continue
+        host = (parsed.hostname or "").lower()
+        if not host:
+            violations.append(f"missing_host:{cleaned}")
+            continue
+        if parsed.scheme == "http" and host not in {"localhost", "127.0.0.1"}:
+            violations.append(f"insecure_http_url:{cleaned}")
+            continue
+        if not host_allowlisted(host):
+            violations.append(f"host_not_allowlisted:{host}")
+
+    if check_patterns:
+        patterns = [
+            r"ignore\s+(all|previous)\s+instructions",
+            r"do\s+not\s+follow\s+system",
+            r"curl\s+.+\|\s*(sh|bash)",
+            r"wget\s+.+\|\s*(sh|bash)",
+            r"reveal\s+.+(api[_-]?key|private[_-]?key|seed|mnemonic|token|password|secret)",
+        ]
+        lowered = raw.lower()
+        for pat in patterns:
+            if re.search(pat, lowered):
+                violations.append(f"blocked_pattern:{pat}")
+    return violations
 
 
 def parse_command(text: str) -> Tuple[str, List[str]]:
@@ -347,30 +390,22 @@ def trigger_plan_review_for_request(chat_id: str, req: Dict, reason: str) -> Non
     if not req_id:
         return
 
+    # planning-only helper command is disabled in the current minimal runtime profile
+    req["plan_review_triggered"] = True
+    req["plan_review_triggered_at"] = now_utc()
+    req["plan_review_exit_code"] = 0
+    req["plan_review_output_preview"] = (
+        "skipped: plan-review command is disabled in current minimal runtime profile."
+    )
+    req["plan_review_reason"] = reason
+    save_approval(req)
     send_message(
         chat_id,
         (
-            "Development is paused until human decision.\n"
-            f"Starting plan review cycle for {req_id}..."
+            f"[plan_review:{req_id}] SKIP\n\n"
+            "Plan-review automation is disabled in current minimal runtime."
         ),
     )
-    code, out = run_cmd(
-        [
-            "./scripts/autonomy/plan-review-cycle.sh",
-            "--reason",
-            f"pending_request:{req_id}:{reason}",
-            "--repo",
-            PLAN_REVIEW_REPO,
-        ],
-        timeout=1200,
-    )
-    req["plan_review_triggered"] = True
-    req["plan_review_triggered_at"] = now_utc()
-    req["plan_review_exit_code"] = code
-    req["plan_review_output_preview"] = (out or "")[:600]
-    save_approval(req)
-    prefix = "PASS" if code == 0 else "FAIL"
-    send_message(chat_id, f"[plan_review:{req_id}] {prefix}\n\n{out or '(no output)'}")
 
 
 def find_json_object(text: str) -> Optional[Dict]:
@@ -486,6 +521,7 @@ def detect_human_blocker(text: str) -> Optional[str]:
         (r"invalid username or token|authentication failed|incorrect api key|invalid api key|invalid x-api-key", "credentials_invalid"),
         (r"permission denied|forbidden|insufficient permission|requires .* permission|permissions\.push=false", "permission_denied"),
         (r"rate limit|too many requests|retry_after|429", "rate_limited"),
+        (r"quarantine blocked content|host_not_allowlisted|insecure_http_url", "quarantine_violation"),
         (r"insufficient_quota|quota exceeded|exceeded your current quota|billing hard limit|out of credits|credit balance is too low|payment required|402", "provider_quota_exhausted"),
         (r"context length|maximum context length|token limit exceeded", "provider_token_limit"),
         (r"model overloaded|server is overloaded|service unavailable|503", "provider_unavailable"),
@@ -755,10 +791,12 @@ def help_text() -> str:
             "/approve <request_id>\n"
             "/reject <request_id>\n"
             "/status\n"
+            "/cycle [execution|kickoff|auto]\n"
             "/emergency_stop [reason]\n"
             "/resume [reason]\n"
             "\n"
-            "All dev commands are disabled in minimal mode.\n"
+            "Only /cycle is allowed as a manual execution command in minimal mode.\n"
+            "All other dev commands are disabled.\n"
             "Agents should request human intervention via [HUMAN_REQUEST] marker.\n"
             "\n"
             f"approval-required: {', '.join(sorted(REQUIRE_APPROVAL_COMMANDS)) or '(none)'}\n"
@@ -785,12 +823,10 @@ def help_text() -> str:
             "/approve <request_id>\n"
             "/reject <request_id>\n"
             "/status\n"
+            "/cycle [execution|kickoff|auto]\n"
             f"/ask <prompt>  (leader: {LEADER_AGENT})\n"
-            f"/commit <task_file>  (leader: {LEADER_AGENT})\n"
-            f"/pr [base_branch] [title...]  (leader: {LEADER_AGENT})\n"
-            f"/e2e  (forced leader-only: {LEADER_AGENT})\n"
-            f"/e2e_merge  (forced leader-only: {LEADER_AGENT}, enabled only if TELEGRAM_ENABLE_E2E_MERGE=true)\n"
-            "/plan_review  (manual planning-only cycle)\n"
+            "/emergency_stop [reason]\n"
+            "/resume [reason]\n"
             "\n"
             f"approval-required: {', '.join(sorted(REQUIRE_APPROVAL_COMMANDS)) or '(none)'}\n"
             f"auto-request-on-blocker: {AUTO_REQUEST_ON_BLOCKER}\n"
@@ -815,12 +851,10 @@ def help_text() -> str:
         "/approve <request_id>\n"
         "/reject <request_id>\n"
         "/status\n"
+        "/cycle [execution|kickoff|auto]\n"
         "/ask <agent> <prompt>\n"
-        "/commit <agent> <task_file>\n"
-        "/pr <agent> [base_branch] [title...]\n"
-        "/e2e [agents_csv]  (merge disabled by default)\n"
-        "/e2e_merge [agents_csv]  (enabled only if TELEGRAM_ENABLE_E2E_MERGE=true)\n"
-        "/plan_review  (manual planning-only cycle)\n"
+        "/emergency_stop [reason]\n"
+        "/resume [reason]\n"
         "\n"
         f"approval-required: {', '.join(sorted(REQUIRE_APPROVAL_COMMANDS)) or '(none)'}\n"
         f"auto-request-on-blocker: {AUTO_REQUEST_ON_BLOCKER}\n"
@@ -883,7 +917,7 @@ def handle_command(chat_id: str, text: str, bypass_approval: bool = False) -> No
             chat_id,
             (
                 "This command is disabled in minimal mode.\n"
-                "Allowed: /help, /pending, /approve, /reject, /status, /emergency_stop, /resume"
+                "Allowed: /help, /pending, /approve, /reject, /status, /cycle, /emergency_stop, /resume"
             ),
         )
         return
@@ -893,15 +927,6 @@ def handle_command(chat_id: str, text: str, bypass_approval: bool = False) -> No
             chat_id,
             "Emergency stop is active. Allowed now: /help, /pending, /reject, /status, /resume",
         )
-        return
-
-    if cmd == "/plan_review":
-        send_message(chat_id, "Running planning-only review cycle...")
-        code, out = run_cmd(
-            ["./scripts/autonomy/plan-review-cycle.sh", "--reason", "manual_command", "--repo", PLAN_REVIEW_REPO],
-            timeout=1200,
-        )
-        report_result(chat_id, "plan_review", code, out, text)
         return
 
     if cmd == "/pending":
@@ -1005,9 +1030,31 @@ def handle_command(chat_id: str, text: str, bypass_approval: bool = False) -> No
     if cmd == "/status":
         send_message(chat_id, "Running health check...")
         code, out = run_cmd(
-            ["./scripts/autonomy/test-all-agents.sh", "--prompt", "한 문장으로 hello"]
+            ["./scripts/autonomy/test-all-agents.sh", "--prompt", "Say hello in one sentence."]
         )
         report_result(chat_id, "status", code, out, text)
+        return
+
+    if cmd == "/cycle":
+        if len(args) > 1:
+            send_message(chat_id, "Usage: /cycle [execution|kickoff|auto]")
+            return
+        mode = "execution"
+        if len(args) == 1:
+            mode = args[0].strip().lower()
+        if mode not in {"execution", "kickoff", "auto"}:
+            send_message(chat_id, "Usage: /cycle [execution|kickoff|auto]")
+            return
+
+        cycle_args = ["./scripts/autonomy/run-cycle.sh"]
+        if mode == "execution":
+            cycle_args.append("--execution")
+        elif mode == "kickoff":
+            cycle_args.append("--kickoff")
+
+        send_message(chat_id, f"Running cycle ({mode})...")
+        code, out = run_cmd(cycle_args, timeout=1800)
+        report_result(chat_id, f"cycle:{mode}", code, out, text)
         return
 
     if cmd == "/ask":
@@ -1036,123 +1083,25 @@ def handle_command(chat_id: str, text: str, bypass_approval: bool = False) -> No
                 send_message(chat_id, f"Unknown agent: {agent}")
                 return
             prompt = text.split(None, 2)[2]
+
+        violations = quarantine_text_violations(prompt, check_patterns=True)
+        if violations:
+            preview = "\n".join(f"- {v}" for v in violations[:5])
+            send_message(
+                chat_id,
+                (
+                    "Quarantine blocked /ask prompt.\n"
+                    "The prompt contains untrusted links or injection-like instructions.\n"
+                    f"{preview}\n\n"
+                    "Use allowlisted reference URLs only and avoid executable instructions."
+                ),
+            )
+            return
+
         service = SERVICE_BY_AGENT[agent]
         send_message(chat_id, f"Querying {agent}...")
         code, out = run_cmd(["./scripts/prompt-one-agent.sh", service, prompt], timeout=240)
         report_result(chat_id, f"ask:{agent}", code, out, text)
-        return
-
-    if cmd == "/commit":
-        if LEADER_ONLY_MODE:
-            if len(args) == 1:
-                agent = LEADER_AGENT
-                task_raw = args[0]
-            elif len(args) == 2 and args[0].lower() in AGENTS:
-                if args[0].lower() != LEADER_AGENT:
-                    send_message(chat_id, f"Leader-only mode: only {LEADER_AGENT} is allowed for /commit.")
-                    return
-                agent = LEADER_AGENT
-                task_raw = args[1]
-            else:
-                send_message(chat_id, f"Usage: /commit <task_file>  (leader: {LEADER_AGENT})")
-                return
-        else:
-            if len(args) != 2:
-                send_message(chat_id, "Usage: /commit <agent> <task_file>")
-                return
-            agent = args[0].lower()
-            if agent not in AGENTS:
-                send_message(chat_id, f"Unknown agent: {agent}")
-                return
-            task_raw = args[1]
-        task_path = safe_rel_path(task_raw)
-        if not task_path or not task_path.exists():
-            send_message(chat_id, f"Invalid task_file: {task_raw}")
-            return
-        send_message(chat_id, f"Running commit for {agent}...")
-        code, out = run_cmd(
-            ["./scripts/autonomy/agent-dev-commit.sh", agent, str(task_path)],
-            timeout=600,
-        )
-        report_result(chat_id, f"commit:{agent}", code, out, text)
-        return
-
-    if cmd == "/pr":
-        if LEADER_ONLY_MODE:
-            agent = LEADER_AGENT
-            rem = args
-            if rem and rem[0].lower() in AGENTS:
-                if rem[0].lower() != LEADER_AGENT:
-                    send_message(chat_id, f"Leader-only mode: only {LEADER_AGENT} is allowed for /pr.")
-                    return
-                rem = rem[1:]
-            base = "main"
-            title = ""
-            if len(rem) >= 1:
-                base = rem[0]
-            if len(rem) >= 2:
-                title = " ".join(rem[1:])
-        else:
-            if len(args) < 1:
-                send_message(chat_id, "Usage: /pr <agent> [base_branch] [title...]")
-                return
-            agent = args[0].lower()
-            if agent not in AGENTS:
-                send_message(chat_id, f"Unknown agent: {agent}")
-                return
-            base = "main"
-            title = ""
-            if len(args) >= 2:
-                base = args[1]
-            if len(args) >= 3:
-                title = " ".join(args[2:])
-        pr_args = ["./scripts/autonomy/create-pr-if-approved.sh", agent, base]
-        if title:
-            pr_args.append(title)
-        send_message(chat_id, f"Creating PR for {agent} (base={base})...")
-        code, out = run_cmd(pr_args, timeout=900)
-        report_result(chat_id, f"pr:{agent}", code, out, text)
-        return
-
-    if cmd in {"/e2e", "/e2e_merge"}:
-        if LEADER_ONLY_MODE:
-            agents = [LEADER_AGENT]
-        else:
-            agents_csv = args[0] if args else "gpt,claude,gemini,grok"
-            agents = [a.strip().lower() for a in agents_csv.split(",") if a.strip()]
-        bad = [a for a in agents if a not in AGENTS]
-        if bad:
-            send_message(chat_id, f"Unknown agents: {', '.join(bad)}")
-            return
-        if not agents:
-            send_message(chat_id, "No agents provided")
-            return
-
-        e2e_args = [
-            "./scripts/autonomy/test-collab-main-flow.sh",
-            "--agents",
-            " ".join(agents),
-            "--review-retries",
-            "5",
-            "--review-retry-sleep",
-            "8",
-            "--commit-retries",
-            "5",
-            "--commit-retry-sleep",
-            "8",
-        ]
-        if cmd == "/e2e":
-            e2e_args.append("--no-merge")
-        else:
-            if not ENABLE_E2E_MERGE:
-                send_message(
-                    chat_id,
-                    "e2e merge is disabled. Set TELEGRAM_ENABLE_E2E_MERGE=true to allow /e2e_merge.",
-                )
-                return
-        send_message(chat_id, f"Running E2E ({'merge' if cmd == '/e2e_merge' else 'no-merge'})...")
-        code, out = run_cmd(e2e_args, timeout=1800)
-        report_result(chat_id, "e2e", code, out, text)
         return
 
     send_message(chat_id, "Unknown command. Use /help")

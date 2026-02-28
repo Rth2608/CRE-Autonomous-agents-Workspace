@@ -3,8 +3,8 @@
 .env.*
 !.env.example
 autonomy/config.env
-secrets/
 state/
+autonomy/skills/
 
 # Runtime state and logs
 autonomy/state/

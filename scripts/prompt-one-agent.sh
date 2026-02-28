@@ -11,17 +11,17 @@ if [[ $# -lt 1 ]]; then
 fi
 
 SERVICE="$1"
-PROMPT="${2:-너는 누구야? 한 문장으로 답해줘.}"
+PROMPT="${2:-Who are you? Answer in one sentence.}"
 
 case "$SERVICE" in
   openclaw-gpt)
-    MODEL="openai/gpt-5.2"
+    MODEL="openai/gpt-5.2-pro"
     ;;
   openclaw-claude)
     MODEL="anthropic/claude-opus-4-6"
     ;;
   openclaw-gemini)
-    MODEL="google-vertex/gemini-2.5-pro"
+    MODEL="google/gemini-3.1-pro-preview"
     ;;
   openclaw-grok)
     MODEL="xai/grok-4"

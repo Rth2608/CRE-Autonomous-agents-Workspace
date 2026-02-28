@@ -33,14 +33,31 @@ if [[ "${AUTO_POST_TO_MOLTBOOK:-false}" != "true" ]]; then
   die "AUTO_POST_TO_MOLTBOOK is false. Refusing to post."
 fi
 
+content_abs="$(readlink -f "$content_file" 2>/dev/null || true)"
+[[ -n "$content_abs" ]] || die "Failed to resolve content file path: $content_file"
+if [[ "${MOLTBOOK_REQUIRE_STATE_ARTIFACTS_ONLY:-true}" == "true" ]]; then
+  case "$content_abs" in
+    "$STATE_DIR"/*) ;;
+    *)
+      die "Refusing to post non-state artifact file: $content_abs"
+      ;;
+  esac
+fi
+
 # Prevent secret leaks.
 "$SELF_DIR/scan-secrets.sh" --file "$content_file"
 printf '%s\n' "$title" | "$SELF_DIR/scan-secrets.sh" --stdin
+"$SELF_DIR/quarantine-untrusted.sh" --file "$content_file" --context "moltbook_post:$agent" --check-patterns
+printf '%s\n' "$title" | "$SELF_DIR/quarantine-untrusted.sh" --stdin --context "moltbook_post_title:$agent" --check-patterns
 
 api_key="$(moltbook_key_for_agent "$agent")"
 [[ -n "$api_key" ]] || die "Missing Moltbook API key for agent: $agent"
 
 content="$(cat "$content_file")"
+max_chars="${MOLTBOOK_MAX_CONTENT_CHARS:-12000}"
+if [[ "${#content}" -gt "$max_chars" ]]; then
+  die "Moltbook post content too large (${#content} chars > ${max_chars}). Create a summarized state artifact first."
+fi
 
 payload="$(jq -n \
   --arg sub "$submolt" \

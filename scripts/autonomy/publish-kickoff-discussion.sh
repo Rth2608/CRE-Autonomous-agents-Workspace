@@ -15,7 +15,7 @@ when KICKOFF_PACK is LOCKED.
 USAGE
 }
 
-target_repo="${AUTONOMY_REPO_PATH:-$ROOT_DIR/workdirs/gpt}"
+target_repo="${AUTONOMY_REPO_PATH:-$ROOT_DIR/workdirs/gemini}"
 force=false
 
 while [[ $# -gt 0 ]]; do

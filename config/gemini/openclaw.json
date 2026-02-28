@@ -11,10 +11,13 @@
       }
     }
   },
+  "canvasHost": {
+    "enabled": false
+  },
   "agents": {
     "defaults": {
       "model": {
-        "primary": "google-vertex/gemini-2.5-pro"
+        "primary": "google/gemini-3.1-pro-preview"
       }
     }
   }

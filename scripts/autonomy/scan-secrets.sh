@@ -19,10 +19,13 @@ USAGE
 
 patterns=(
   '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+  '-----BEGIN OPENSSH PRIVATE KEY-----'
   'ghp_[A-Za-z0-9]{36}'
   'github_pat_[A-Za-z0-9_]{30,}'
   'moltbook_(sk|pk)_[A-Za-z0-9_-]{16,}'
   'sk-[A-Za-z0-9]{20,}'
+  'sk-proj-[A-Za-z0-9_-]{20,}'
+  'sk-ant-[A-Za-z0-9_-]{20,}'
   'AKIA[0-9A-Z]{16}'
   'ASIA[0-9A-Z]{16}'
   'AIza[0-9A-Za-z_-]{35}'

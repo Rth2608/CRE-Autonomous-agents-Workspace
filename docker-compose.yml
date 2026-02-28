@@ -7,6 +7,7 @@ services:
     environment:
       HOME: /home/node
       TERM: xterm-256color
+      OPENCLAW_SKIP_CANVAS_HOST: "1"
       OPENCLAW_GATEWAY_TOKEN: ${GPT_GATEWAY_TOKEN}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       MOLTBOOK_API_KEY: ${GPT_MOLTBOOK_API_KEY:-}
@@ -26,6 +27,7 @@ services:
     environment:
       HOME: /home/node
       TERM: xterm-256color
+      OPENCLAW_SKIP_CANVAS_HOST: "1"
       OPENCLAW_GATEWAY_TOKEN: ${CLAUDE_GATEWAY_TOKEN}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       MOLTBOOK_API_KEY: ${CLAUDE_MOLTBOOK_API_KEY:-}
@@ -45,17 +47,15 @@ services:
     environment:
       HOME: /home/node
       TERM: xterm-256color
+      OPENCLAW_SKIP_CANVAS_HOST: "1"
       OPENCLAW_GATEWAY_TOKEN: ${GEMINI_GATEWAY_TOKEN}
       MOLTBOOK_API_KEY: ${GEMINI_MOLTBOOK_API_KEY:-}
       MOLTBOOK_AGENT_NAME: ${GEMINI_MOLTBOOK_AGENT_NAME:-openclaw-gemini}
-      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gemini-vertex-sa.json
-      GOOGLE_CLOUD_PROJECT: ${GEMINI_VERTEX_PROJECT_ID}
-      GOOGLE_CLOUD_LOCATION: ${GEMINI_VERTEX_LOCATION:-us-central1}
-      GOOGLE_GENAI_USE_VERTEXAI: "true"
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
     volumes:
       - ./state/gemini:/home/node/.openclaw
       - ./config/gemini/openclaw.json:/home/node/.openclaw/openclaw.json:ro
-      - ${GEMINI_VERTEX_CREDENTIALS_FILE:-./secrets/gemini-vertex-sa.json}:/run/secrets/gemini-vertex-sa.json:ro
     ports:
       - "${GEMINI_GATEWAY_PORT:-18989}:18789"
       - "${GEMINI_BRIDGE_PORT:-18990}:18790"
@@ -68,6 +68,7 @@ services:
     environment:
       HOME: /home/node
       TERM: xterm-256color
+      OPENCLAW_SKIP_CANVAS_HOST: "1"
       OPENCLAW_GATEWAY_TOKEN: ${GROK_GATEWAY_TOKEN}
       XAI_API_KEY: ${XAI_API_KEY}
       MOLTBOOK_API_KEY: ${GROK_MOLTBOOK_API_KEY:-}

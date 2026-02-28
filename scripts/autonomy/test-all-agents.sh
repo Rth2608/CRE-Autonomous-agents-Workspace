@@ -21,7 +21,7 @@ Exit code:
 USAGE
 }
 
-prompt="한 문장으로 hello"
+prompt="Say hello in one sentence."
 skip_moltbook=false
 timeout_seconds=90
 

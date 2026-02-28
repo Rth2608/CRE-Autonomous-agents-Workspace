@@ -3,7 +3,6 @@
 This folder contains guardrailed automation for 4 OpenClaw agents collaborating via:
 - Git branches (`agent/gpt`, `agent/claude`, `agent/gemini`, `agent/grok`)
 - Optional Moltbook discussion posts
-- Optional AI review gate before PR creation
 
 ## Safety Guarantees
 
@@ -13,9 +12,8 @@ This folder contains guardrailed automation for 4 OpenClaw agents collaborating 
 - RPC URLs are checked against denied mainnet patterns
 
 2. Secret leak prevention:
-- secret scanner blocks commits/pushes via git hooks
+- secret scanner checks key cycle artifacts before posting/processing
 - Moltbook posting path scans title/content before send
-- PR body/title is scanned before API call
 
 ## Setup
 
@@ -27,26 +25,44 @@ cp autonomy/config.env.example autonomy/config.env
 
 2. Edit `autonomy/config.env`:
 - keep `EXECUTION_MODE=virtual`
-- set `AUTO_POST_TO_MOLTBOOK`, `AUTO_DEV_COMMITS`, `AUTO_CREATE_PR` as needed
-- set `AUTO_MERGE_PR=true` for automatic merge after merge-consensus gate
+- keep `CYCLE_MODE=auto` (first cycle kickoff, later cycles execution)
+- keep `AUTO_POST_TO_MOLTBOOK=true` if you want cycle discussions published
 - set `AGENT_LEADER=gemini` to make Gemini the coordination leader
 - set `AUTO_MOLTBOOK_KICKOFF_DISCUSSION=true` to auto-publish kickoff discussion once topic is LOCKED
 - keep `MOLTBOOK_REQUIRE_MAIN_LOCKED=true` to require locked kickoff on `origin/main` before publishing
+- keep `TELEGRAM_WATCHDOG_ENABLED=false` and `TELEGRAM_AUTO_PLAN_REVIEW_ON_PENDING=false` to avoid idle token spend
 
-3. Install git guard hooks in all 4 workdirs:
+3. Check all agents before first cycle:
 
 ```bash
-./scripts/autonomy/install-guard-hooks.sh
+./scripts/autonomy/test-all-agents.sh --prompt "Say hello in one sentence."
 ```
 
 ## Recommended References
 
-- CRE HTTP Trigger (TypeScript): `https://docs.chain.link/cre/guides/workflow/using-triggers/http-trigger/overview-ts`
-- Chainlink agent skills repo: `https://github.com/smartcontractkit/chainlink-agent-skills/`
+- Local skills repo: `autonomy/skills/chainlink-agent-skills`
+- Default references folder used by `run-cycle.sh`:
+  `autonomy/skills/chainlink-agent-skills/cre-skills/references`
+- Optional kickoff source-of-truth file (if present):
+  `workdirs/gemini/coordination/KICKOFF_PACK.md` (or `AUTONOMY_REPO_PATH/coordination/KICKOFF_PACK.md`)
 
 Optional config overrides:
-- `CRE_HTTP_TRIGGER_DOC_URL=...`
-- `CHAINLINK_AGENT_SKILLS_URL=...`
+- `CHAINLINK_AGENT_SKILLS_DIR=...`
+- `CHAINLINK_AGENT_SKILLS_REFERENCES_DIR=...`
+- `CHAINLINK_AGENT_SKILLS_MAX_FILES=...`
+- `CHAINLINK_AGENT_SKILLS_MAX_LINES_PER_FILE=...`
+- `CHAINLINK_AGENT_SKILLS_MAX_CHARS=...`
+- `KICKOFF_PACK_MAX_LINES=...`
+- `TENDERLY_PLAN=pro`
+- `LLM_BUDGET_OPENAI_USD=35`
+- `LLM_BUDGET_ANTHROPIC_USD=35`
+- `LLM_BUDGET_GOOGLE_USD=35`
+- `LLM_BUDGET_XAI_USD=35`
+- `OTHER_PAID_COST_BUDGET_USD=10`
+- `ALT_TOPICS_SUMMARY_ENABLED=...`
+- `ALT_TOPICS_PUSH_ENABLED=...`
+- `ALT_TOPICS_PUSH_REQUIRED=...`
+- `ALT_TOPICS_SUMMARY_DIR=...`
 
 ## One Cycle (discussion + decision + task split)
 
@@ -54,46 +70,43 @@ Optional config overrides:
 ./scripts/autonomy/run-cycle.sh
 ```
 
+`CYCLE_MODE=auto` behavior:
+- if `autonomy/state/cycle-plan.json` is missing: kickoff cycle
+- if `autonomy/state/cycle-plan.json` exists: execution cycle
+
+Kickoff/execution outputs now include:
+- `innovation_summary`
+- `failure_modes_and_mitigations`
+- `optional_enablers` (`tenderly_virtual_networks`, `world_id`)
+- `cost_plan` (Tenderly plan + per-provider LLM budget caps + other paid-cost cap)
+- kickoff-only: leader `alternative-topics` summary markdown + optional git push
+
+Force kickoff once:
+
+```bash
+./scripts/autonomy/run-cycle.sh --kickoff
+```
+
+Force execution planning cycle:
+
+```bash
+./scripts/autonomy/run-cycle.sh --execution
+```
+
 If `AUTO_POST_TO_MOLTBOOK=true` and kickoff is LOCKED, the cycle auto-runs:
 - leader kickoff post
-- 4 agent comments for plan concretization
+- multi-round agent discussion comments on one feature thread (single-thread mode)
+- leader checkpoint comment per round (optional)
+- final leader consensus comment
 
-## One Cycle with Autonomous Code Commit Attempts
-
-```bash
-./scripts/autonomy/run-cycle.sh --autocode
-```
-
-## Continuous Loop
-
-```bash
-./scripts/autonomy/run-loop.sh 1800
-```
-
-## AI Review Gate (manual check)
-
-```bash
-./scripts/autonomy/ai-review-gate.sh claude main
-```
-
-## Kickoff Gate (recommended before first autonomous cycle)
-
-Initialize kickoff files in your dev repo (default: `workdirs/gpt`):
-
-```bash
-./scripts/autonomy/init-kickoff-gate-files.sh --repo workdirs/gpt
-```
-
-Check gate readiness:
-
-```bash
-./scripts/autonomy/check-kickoff-gate.sh --repo workdirs/gpt --require-health
-```
+Discussion tuning options:
+- `AUTO_MOLTBOOK_DISCUSSION_ROUNDS` (default: 3)
+- `AUTO_MOLTBOOK_LEADER_ROUND_SUMMARIES` (default: true)
 
 ## Test All 4 Agents At Once
 
 ```bash
-./scripts/autonomy/test-all-agents.sh --prompt "한 문장으로 hello"
+./scripts/autonomy/test-all-agents.sh --prompt "Say hello in one sentence."
 ```
 
 Skip Moltbook status checks:
@@ -102,61 +115,16 @@ Skip Moltbook status checks:
 ./scripts/autonomy/test-all-agents.sh --skip-moltbook
 ```
 
-## End-to-End GitHub Flow Test (Agent -> Review -> PR -> Main)
-
-```bash
-export GITHUB_TOKEN=...  # required
-./scripts/autonomy/test-collab-main-flow.sh
-```
-
-Create PRs only (no merge):
-
-```bash
-./scripts/autonomy/test-collab-main-flow.sh --no-merge
-```
-
-Retry review gate for transient model/API failures:
-
-```bash
-./scripts/autonomy/test-collab-main-flow.sh --review-retries 5 --review-retry-sleep 8
-```
-
-Also retry commit phase for transient gateway errors:
-
-```bash
-./scripts/autonomy/test-collab-main-flow.sh --commit-retries 5 --commit-retry-sleep 8
-```
-
-## Create PR only if gate passes
-
-```bash
-export GITHUB_TOKEN=...  # keep in shell only
-./scripts/autonomy/create-pr-if-approved.sh claude main "[agent/claude] feat: ..."
-```
-
-## Auto Merge (3-of-4 Consensus)
-
-When `AUTO_MERGE_PR=true`, `create-pr-if-approved.sh` does:
-1) PR creation
-2) merge-consensus gate (includes all 4 agents, requires `MERGE_CONSENSUS_MIN`, default 3)
-3) GitHub merge API call (`AUTO_MERGE_METHOD`, default `squash`)
-
-Manual merge gate command:
-
-```bash
-./scripts/autonomy/merge-pr-if-approved.sh gemini 12 main
-```
-
 ## Telegram Control (Optional)
 
 1. Set in `.env`:
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_ALLOWED_CHAT_IDS` (comma-separated)
-- keep `TELEGRAM_ENABLE_E2E_MERGE=false` unless explicitly needed
 - set `TELEGRAM_LEADER_ONLY_MODE=true` for leader-only human control
 - set `TELEGRAM_MINIMAL_COMMAND_MODE=true` for approval + emergency-only control
 - keep `TELEGRAM_AGENT_CONSENSUS_REQUIRED=true` and `TELEGRAM_AGENT_CONSENSUS_MIN=3`
-- keep watchdog enabled for immediate escalation on agent failure/quota issues
+- keep `TELEGRAM_WATCHDOG_ENABLED=false` for zero idle LLM checks
+- keep `TELEGRAM_AUTO_PLAN_REVIEW_ON_PENDING=false` unless you want automatic plan-review runs
 
 2. Start controller:
 
@@ -170,29 +138,26 @@ Manual merge gate command:
 - `/approve <request_id>`
 - `/reject <request_id>`
 - `/status`
+- `/cycle [execution|kickoff|auto]`
 - `/emergency_stop [reason]`
 - `/resume [reason]`
 - manual dev commands are disabled in minimal mode
 
 Leader-only mode (`TELEGRAM_LEADER_ONLY_MODE=true`):
 - `/ask <prompt>` targets only `AGENT_LEADER`
-- `/commit <task_file>` targets only `AGENT_LEADER`
-- `/pr [base_branch] [title...]` targets only `AGENT_LEADER`
-- `/e2e`, `/e2e_merge` are forced to leader-only execution
 
 Emergency stop behavior:
 - `/emergency_stop` enables global stop flag (`autonomy/state/emergency-stop.json`)
 - autonomous scripts refuse execution while stop is active
-- `run-loop.sh` stays alive and skips cycle ticks until `/resume`
+- `/resume` clears stop state and allows cycle commands again
 
 Approval policy:
 - `TELEGRAM_REQUIRE_APPROVAL_COMMANDS` controls which commands require manual approval.
-- Default: `pr,e2e_merge`
+- Default: empty (no pre-execution approval commands)
 - `TELEGRAM_AUTO_REQUEST_ON_BLOCKER=true` auto-creates approval request only when
   command fails with blocker patterns (auth/permission/rate-limit/etc).
-- `TELEGRAM_PAUSE_DEV_WHEN_PENDING=true` blocks dev commands while approvals are pending.
-- `TELEGRAM_AUTO_PLAN_REVIEW_ON_PENDING=true` runs a planning-only review cycle during pause.
-- `TELEGRAM_PLAN_REVIEW_REPO=workdirs/gpt` selects which repo snapshot is reviewed.
+- `TELEGRAM_PAUSE_DEV_WHEN_PENDING=true` blocks `/cycle` while approvals are pending.
+- `TELEGRAM_AUTO_PLAN_REVIEW_ON_PENDING=false` avoids background planning costs while paused.
 - `TELEGRAM_AGENT_CONSENSUS_REQUIRED=true` requires 3-of-4 vote before converting
   `[HUMAN_REQUEST]` to pending human approval.
 - If consensus voting itself fails because one or more agents are unavailable,
@@ -201,7 +166,8 @@ Approval policy:
   while any pending approval exists.
 
 Watchdog policy:
-- `TELEGRAM_WATCHDOG_ENABLED=true` periodically runs all-agent health checks.
+- `TELEGRAM_WATCHDOG_ENABLED=false` by default (manual-only, no idle checks).
+- Set `TELEGRAM_WATCHDOG_ENABLED=true` only when you need automatic health escalation.
 - If any agent fails (including provider quota/token/billing failures), it creates
   a pending human request immediately.
 - Recovery message is sent automatically once health checks pass again.

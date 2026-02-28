@@ -11,6 +11,9 @@
       }
     }
   },
+  "canvasHost": {
+    "enabled": false
+  },
   "agents": {
     "defaults": {
       "model": {

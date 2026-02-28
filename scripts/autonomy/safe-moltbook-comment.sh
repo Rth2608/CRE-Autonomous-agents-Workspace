@@ -42,12 +42,28 @@ if [[ -z "$post_id" ]]; then
   die "post_id is empty"
 fi
 
+content_abs="$(readlink -f "$content_file" 2>/dev/null || true)"
+[[ -n "$content_abs" ]] || die "Failed to resolve content file path: $content_file"
+if [[ "${MOLTBOOK_REQUIRE_STATE_ARTIFACTS_ONLY:-true}" == "true" ]]; then
+  case "$content_abs" in
+    "$STATE_DIR"/*) ;;
+    *)
+      die "Refusing to comment with non-state artifact file: $content_abs"
+      ;;
+  esac
+fi
+
 "$SELF_DIR/scan-secrets.sh" --file "$content_file"
+"$SELF_DIR/quarantine-untrusted.sh" --file "$content_file" --context "moltbook_comment:$agent:$post_id" --check-patterns
 
 api_key="$(moltbook_key_for_agent "$agent")"
 [[ -n "$api_key" ]] || die "Missing Moltbook API key for agent: $agent"
 
 content="$(cat "$content_file")"
+max_chars="${MOLTBOOK_MAX_CONTENT_CHARS:-12000}"
+if [[ "${#content}" -gt "$max_chars" ]]; then
+  die "Moltbook comment content too large (${#content} chars > ${max_chars}). Create a summarized state artifact first."
+fi
 
 primary_ep="${MOLTBOOK_COMMENT_ENDPOINT:-https://www.moltbook.com/api/v1/comments}"
 fallback_ep="${MOLTBOOK_COMMENT_ENDPOINT_FALLBACK:-https://www.moltbook.com/api/v1/posts/$post_id/comments}"
@@ -69,7 +85,7 @@ fi
 
 payload_fallback="$(jq -n \
   --arg content "$content" \
-  '{content:$content, type:"text"}')"
+  '{content:$content}')"
 
 resp_fallback="$(curl -sS -X POST "$fallback_ep" \
   -H "Authorization: Bearer $api_key" \
